@@ -1,0 +1,174 @@
+Installation of Kubernetes Cluster on Master-Node
+For Kubernetes to work, you will need a containerization engine. For this installation, we will use docker as it is the most popular.
+
+The following steps will run on the Master-Node.
+
+Step 1: Prepare Hostname, Firewall and SELinux
+On your master node, set the hostname and if you don’t have a DNS server, then also update your /etc/hosts file.
+
+# hostnamectl set-hostname master-node
+# cat <<EOF>> /etc/hosts
+10.128.0.27 master-node
+10.128.0.29 node-1 worker-node-1
+10.128.0.30 node-2 worker-node-2
+EOF
+You can ping worker-node-1 and worker-node-2 to test if your updated hostfile is fine using ping command.
+
+# ping 10.128.0.29
+# ping 10.128.0.30
+Next, disable SElinux and update your firewall rules.
+
+# setenforce 0
+# sed -i --follow-symlinks 's/SELINUX=enforcing/SELINUX=disabled/g' /etc/sysconfig/selinux
+# reboot
+Set the following firewall rules on ports. Make sure that each firewall-cmd command, returns a success.
+
+# firewall-cmd --permanent --add-port=6443/tcp
+# firewall-cmd --permanent --add-port=2379-2380/tcp
+# firewall-cmd --permanent --add-port=10250/tcp
+# firewall-cmd --permanent --add-port=10251/tcp
+# firewall-cmd --permanent --add-port=10252/tcp
+# firewall-cmd --permanent --add-port=10255/tcp
+# firewall-cmd –reload
+# modprobe br_netfilter
+# echo '1' > /proc/sys/net/bridge/bridge-nf-call-iptables
+Step 2: Setup the Kubernetes Repo
+
+You will need to add Kubernetes repositories manually as they do not come installed by default on CentOS 7.
+
+vim /etc/yum.repos.d/kubernetes.repo
+
+[kubernetes]
+name=Kubernetes
+baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+
+Step 3: Install Kubeadm and Docker
+With the package repo now ready, you can go ahead and install kubeadm and docker packages.
+
+# yum install kubeadm docker -y 
+When the installation completes successfully, enable and start both services.
+
+# systemctl enable kubelet
+# systemctl start kubelet
+# systemctl enable docker
+# systemctl start docker
+Step 4: Initialize Kubernetes Master and Setup Default User
+Now we are ready to initialize kubernetes master, but before that you need to disable swap in order to run “kubeadm init“ command.
+
+# swapoff -a
+Initializing Kubernetes master is a fully automated process that is managed by the “kubeadm init“ command which you will run.
+
+# kubeadm init
+Initialize Kubernetes Master
+Initialize Kubernetes Master
+You may want to copy the last line and save it somewhere because you will need to run it on the worker nodes.
+
+kubeadm join 10.128.0.27:6443 --token nu06lu.xrsux0ss0ixtnms5  \ --discovery-token-ca-cert-hash sha256:f996ea3564e6a07fdea2997a1cf8caeddafd6d4360d606dbc82314688425cd41 
+Tip: Sometimes this command might complain about the arguments (args) passed, so edit it to avoid any errors. So, you will delete the ‘\’ character accompanying the --token and your final command will look like this.
+
+kubeadm join 10.128.0.27:6443 --token nu06lu.xrsux0ss0ixtnms5  --discovery-token-ca-cert-hash sha256:f996ea3564e6a07fdea2997a1cf8caeddafd6d4360d606dbc82314688425cd41
+Having initialized Kubernetes successfully, you will need to allow your user to start using the cluster. In our case, we want to run this installation as root user, therefore we will go ahead and run these commands as root. You can change to a sudo enabled user you prefer and run the below using sudo.
+
+To use root, run:
+
+# mkdir -p $HOME/.kube
+# cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+# chown $(id -u):$(id -g) $HOME/.kube/config
+To use a sudo enabled user, run:
+
+$ mkdir -p $HOME/.kube
+$ sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+$ sudo chown $(id -u):$(id -g) $HOME/.kube/config
+Now check to see if the kubectl command is activated.
+
+# kubectl get nodes
+Check Status of Nodes
+Check Status of Nodes
+At this point, you will also notice that the status of the master-node is ‘NotReady’. This is because we are yet to deploy the pod network to the cluster.
+
+The pod Network is the overlay network for the cluster, that is deployed on top of the present node network. It is designed to allow connectivity across the pod.
+
+Step 5: Setup Your Pod Network
+Deploying the network cluster is a highly flexible process depending on your needs and there are many options available. Since we want to keep our installation as simple as possible, we will use Weavenet plugin which does not require any configuration or extra code and it provides one IP address per pod which is great for us. If you want to see more options, please check here.
+
+These commands will be important to get the pod network setup.
+
+# export kubever=$(kubectl version | base64 | tr -d '\n')
+# kubectl apply -f "https://cloud.weave.works/k8s/net?k8s-version=$kubever"
+Setup Pod Network
+Setup Pod Network
+Now if you check the status of your master-node, it should be ‘Ready’.
+
+# kubectl get nodes
+Check Status of Master Nodes
+Check Status of Master Nodes
+Next, we add the worker nodes to the cluster.
+
+Setting Up Worker Nodes to Join Kubernetes Cluster
+The following steps will run on the worker nodes. These steps should be run on every worker node when joining the Kubernetes cluster.
+
+Step 1: Prepare Hostname, Firewall and SELinux
+On your worker-node-1 and worker-node-2, set the hostname and in case you don’t have a DNS server, then also update your master and worker nodes on /etc/hosts file.
+
+# hostnamectl set-hostname 'node-1'
+# cat <<EOF>> /etc/hosts
+10.128.0.27 master-node
+10.128.0.29 node-1 worker-node-1
+10.128.0.30 node-2 worker-node-2
+EOF
+You can ping master-node to test if your updated hostfile is fine.
+
+Next, disable SElinux and update your firewall rules.
+
+# setenforce 0
+# sed -i --follow-symlinks 's/SELINUX=enforcing/SELINUX=disabled/g' /etc/sysconfig/selinux
+Set the following firewall rules on ports. Make sure that all firewall-cmd commands, return success.
+
+# firewall-cmd --permanent --add-port=6783/tcp
+# firewall-cmd --permanent --add-port=10250/tcp
+# firewall-cmd --permanent --add-port=10255/tcp
+# firewall-cmd --permanent --add-port=30000-32767/tcp
+# firewall-cmd  --reload
+# echo '1' > /proc/sys/net/bridge/bridge-nf-call-iptables
+Step 2: Setup the Kubernetes Repo
+You will need to add Kubernetes repositories manually as they do not come pre-installed on CentOS 7.
+
+cat <<EOF > /etc/yum.repos.d/kubernetes.repo
+[kubernetes]
+name=Kubernetes
+baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+EOF
+Step 3: Install Kubeadm and Docker
+With the package repo now ready, you can go ahead and install kubeadm and docker packages.
+
+# yum install kubeadm docker -y 
+Start and enable both the services.
+
+# systemctl enable docker
+# systemctl start docker
+# systemctl enable kubelet
+# systemctl start kubelet
+Step 4: Join the Worker Node to the Kubernetes Cluster
+We now require the token that kubeadm init generated, to join the cluster. You can copy and paste it to your node-1 and node-2 if you had copied it somewhere.
+
+# kubeadm join 10.128.0.27:6443 --token nu06lu.xrsux0ss0ixtnms5  --discovery-token-ca-cert-hash sha256:f996ea3564e6a07fdea2997a1cf8caeddafd6d4360d606dbc82314688425cd41 
+Join Nodes to Kubernets Cluster
+Join Nodes to Kubernets Cluster
+As suggested on the last line, go back to your master-node and check if worker node-1 and worker node-2 have joined the cluster using the following command.
+
+# kubectl get nodes
+Check All Nodes Status in Kubernetes Cluster
+Check All Nodes Status in Kubernetes Cluster
+If all the steps run successfully, then, you should see node-1 and node-2 in ready status on the master-node.
+
+Recommended Read: How to Deploy Nginx on a Kubernetes Cluster
+
+At this point, we have successfully completed an installation of a Kubernetes cluster on Centos 7 and we have successfully on-boarded two worker-nodes. You can now begin to create your pods and deploy your services.
